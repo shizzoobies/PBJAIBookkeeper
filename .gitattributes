@@ -1,0 +1,13 @@
+# Normalize line endings to LF in the repo for cross-platform consistency
+# (Worker + dashboard build in Linux-based CI).
+* text=auto eol=lf
+
+# Keep binary assets untouched
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
