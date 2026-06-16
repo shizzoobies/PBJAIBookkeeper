@@ -15,7 +15,7 @@ A multi-tenant "AI bookkeeper" for an accounting firm. This repo is the **sandbo
 ## Status
 
 - **Phase 0 — Foundation: ✅ complete — gate passed 2026-06-16.** OAuth connect/callback, self-rotating token refresh (atomic refresh-token persistence), D1 schema, QBO `query()` client. Proven on the QuickBooks Online sandbox: a company connects via OAuth, the hourly cron refreshes its access token unattended, and `SELECT * FROM CompanyInfo` returns live data. Security/correctness review: [`docs/security-review-phase0.md`](docs/security-review-phase0.md).
-- Phase 1 — read, classify, reconcile prep, dashboard (not started).
+- **Phase 1 — read, classify, reconcile prep, dashboard:** stages 1–4 ✅ built & deployed (sync, AI categorization with learned rules, reconciliation prep, and the Pages dashboard). **Stage 5 remaining:** Cloudflare Access on the dashboard + the non-technical gate test. Resume guide: [`HANDOFF.md`](HANDOFF.md).
 
 ## Layout
 

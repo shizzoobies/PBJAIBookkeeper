@@ -21,8 +21,9 @@ import { runTokenRefreshSweep } from './cron';
 
 const app = new Hono<{ Bindings: Env }>();
 
-// Allow the dashboard (Pages, a separate origin) to call the API.
-app.use('/api/*', cors());
+// Allow the dashboard (Pages, a separate origin) to call the Worker
+// (the status route `/` and all `/api/*` endpoints).
+app.use('*', cors());
 
 app.get('/', async (c) => {
   const realms = await listActiveRealms(c.env);
