@@ -1,0 +1,37 @@
+name = "ai-bookkeeper"
+main = "worker/src/index.ts"
+compatibility_date = "2025-06-01"
+
+# Non-secret config. Secrets (QBO_CLIENT_ID/SECRET, TOKEN_ENC_KEY, etc.) are set
+# with `wrangler secret put` and never committed. See .dev.vars.example for local dev.
+[vars]
+QBO_ENVIRONMENT = "sandbox"
+# Cron refreshes any access token expiring within this many seconds.
+REFRESH_WINDOW_SECONDS = "3600"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-bookkeeper"
+database_id = "e8fc1ba9-d795-4ed0-90f6-aaf65785508d"
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "COA_CACHE"
+id = "18ef94df3f5f4a2c87528cc80ba8b633"
+
+# Hourly token-refresh sweep (keeps access tokens fresh and the refresh token alive).
+[triggers]
+crons = ["0 * * * *"]
+
+# ---------------------------------------------------------------------------
+# Phase 1 — async sync + categorization jobs.
+# Cloudflare Queues may require the Workers Paid plan; enable when we get there.
+# [[queues.producers]]
+# binding = "BOOKKEEPER_JOBS"
+# queue = "bookkeeper-jobs"
+#
+# [[queues.consumers]]
+# queue = "bookkeeper-jobs"
+# max_batch_size = 10
+# max_retries = 3
+# ---------------------------------------------------------------------------
