@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { query } from './qbo';
 import { runSync } from './sync';
 import { categorizePending } from './categorize';
+import { reconcile, parseStatementCsv } from './reconcile';
 import {
   listActiveRealms,
   listTransactions,
@@ -119,6 +120,27 @@ app.post('/api/transactions/:id/adjust', async (c) => {
     detail_json: JSON.stringify({ id, account: parsed.data.account_qbo_id, ruleWritten: !!txn.payee }),
   });
   return c.json({ ok: true, ruleWritten: !!txn.payee });
+});
+
+// Reconciliation prep: match posted transactions in [from,to] against an uploaded
+// bank-statement CSV; return matched / book-only / statement-only buckets + flags.
+app.post('/api/reconcile', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const parsed = z
+    .object({
+      from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      csv: z.string().min(1),
+    })
+    .safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: 'invalid_request', detail: 'need from, to (YYYY-MM-DD), and csv' }, 400);
+  }
+  const lines = parseStatementCsv(parsed.data.csv);
+  const worksheet = await reconcile(c.env, realm, parsed.data.from, parsed.data.to, lines);
+  return c.json(worksheet);
 });
 
 app.post('/webhook/qbo', handleWebhook);

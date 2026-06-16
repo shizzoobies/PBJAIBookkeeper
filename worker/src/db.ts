@@ -208,3 +208,17 @@ export async function adjustTransaction(env: Env, id: number, accountQboId: stri
     .bind(accountQboId, accountQboId, nowSeconds(), id)
     .run();
 }
+
+export async function listTransactionsInPeriod(
+  env: Env,
+  realmId: string,
+  from: string,
+  to: string,
+): Promise<TransactionRow[]> {
+  const { results } = await env.DB.prepare(
+    'SELECT * FROM transactions WHERE realm_id = ? AND txn_date >= ? AND txn_date <= ? ORDER BY txn_date, id',
+  )
+    .bind(realmId, from, to)
+    .all<TransactionRow>();
+  return results ?? [];
+}
