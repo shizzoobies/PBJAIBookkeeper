@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import type { Env } from './types';
 import { handleConnect, handleCallback } from './oauth';
 import { handleWebhook } from './webhook';
 import { z } from 'zod';
-import { query } from './qbo';
-import { runSync } from './sync';
+import { query, report } from './qbo';
+import { runSync, type CoaEntry } from './sync';
 import { categorizePending } from './categorize';
 import { reconcile, parseStatementCsv } from './reconcile';
 import {
@@ -19,6 +20,9 @@ import {
 import { runTokenRefreshSweep } from './cron';
 
 const app = new Hono<{ Bindings: Env }>();
+
+// Allow the dashboard (Pages, a separate origin) to call the API.
+app.use('/api/*', cors());
 
 app.get('/', async (c) => {
   const realms = await listActiveRealms(c.env);
@@ -141,6 +145,36 @@ app.post('/api/reconcile', async (c) => {
   const lines = parseStatementCsv(parsed.data.csv);
   const worksheet = await reconcile(c.env, realm, parsed.data.from, parsed.data.to, lines);
   return c.json(worksheet);
+});
+
+// Chart of accounts (from KV) so the dashboard can show category names.
+app.get('/api/accounts', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const raw = await c.env.COA_CACHE.get(`coa:${realm.realm_id}`);
+  const accounts: CoaEntry[] = raw ? (JSON.parse(raw) as CoaEntry[]) : [];
+  return c.json({ accounts });
+});
+
+// Reports — read on demand (never polled), per the read-discipline constraint.
+app.get('/api/reports/pnl', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+  const data = await report(c.env, realm, 'ProfitAndLoss', from && to ? { start_date: from, end_date: to } : {});
+  return Response.json(data);
+});
+
+app.get('/api/reports/balance-sheet', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const to = c.req.query('to');
+  const data = await report(c.env, realm, 'BalanceSheet', to ? { end_date: to } : {});
+  return Response.json(data);
 });
 
 app.post('/webhook/qbo', handleWebhook);

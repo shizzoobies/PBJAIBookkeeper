@@ -114,3 +114,21 @@ export async function queryAll<T = unknown>(env: Env, realm: RealmRow, fromEntit
   }
   return all;
 }
+
+// QBO report (e.g. 'ProfitAndLoss', 'BalanceSheet'). reportName is a fixed string
+// from our code; params (start_date/end_date) are caller-supplied.
+export async function report<T = unknown>(
+  env: Env,
+  realm: RealmRow,
+  reportName: string,
+  params: Record<string, string>,
+): Promise<T> {
+  const token = await getValidAccessToken(env, realm);
+  const qs = new URLSearchParams({ ...params, minorversion: QBO_MINOR_VERSION }).toString();
+  const url = `${apiBase(env)}/v3/company/${realm.realm_id}/reports/${reportName}?${qs}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
+  if (!res.ok) {
+    throw new Error(`QBO report ${reportName} failed (${res.status}): ${await res.text()}`);
+  }
+  return (await res.json()) as T;
+}
