@@ -2,8 +2,19 @@ import { Hono } from 'hono';
 import type { Env } from './types';
 import { handleConnect, handleCallback } from './oauth';
 import { handleWebhook } from './webhook';
+import { z } from 'zod';
 import { query } from './qbo';
-import { listActiveRealms } from './db';
+import { runSync } from './sync';
+import { categorizePending } from './categorize';
+import {
+  listActiveRealms,
+  listTransactions,
+  getTransaction,
+  approveTransaction,
+  adjustTransaction,
+  insertRule,
+  audit,
+} from './db';
 import { runTokenRefreshSweep } from './cron';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -28,6 +39,86 @@ app.get('/api/company', async (c) => {
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const data = await query(c.env, realm, 'SELECT * FROM CompanyInfo');
   return Response.json(data);
+});
+
+// Pull chart of accounts (→ KV) and posted Purchases (→ D1). Manual trigger for
+// the test; production drives this from the webhook/cron, never by polling.
+app.post('/api/sync', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const result = await runSync(c.env, realm);
+  return c.json({ ok: true, ...result });
+});
+
+// Review-queue data: synced transactions (optionally filtered by review_status).
+app.get('/api/transactions', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const status = c.req.query('status');
+  const transactions = await listTransactions(c.env, realm.realm_id, status);
+  return c.json({ transactions });
+});
+
+// Run categorization (rules pass, then Claude for the remainder) over pending txns.
+app.post('/api/categorize', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: 'anthropic_key_not_configured' }, 503);
+  const result = await categorizePending(c.env, realm);
+  return c.json({ ok: true, ...result });
+});
+
+// Approve a transaction's current/suggested category.
+app.post('/api/transactions/:id/approve', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid_id' }, 400);
+  const txn = await getTransaction(c.env, id, realm.realm_id);
+  if (!txn) return c.json({ error: 'not_found' }, 404);
+  await approveTransaction(c.env, id);
+  await audit(c.env, {
+    realm_id: realm.realm_id,
+    actor: 'user',
+    action: 'transaction_approved',
+    detail_json: JSON.stringify({ id, account: txn.suggested_account ?? txn.account_qbo_id }),
+  });
+  return c.json({ ok: true });
+});
+
+// Adjust a transaction's category; learn a rule so the same payee is deterministic next time.
+app.post('/api/transactions/:id/adjust', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid_id' }, 400);
+  const parsed = z.object({ account_qbo_id: z.string().min(1) }).safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'account_qbo_id_required' }, 400);
+  const txn = await getTransaction(c.env, id, realm.realm_id);
+  if (!txn) return c.json({ error: 'not_found' }, 404);
+  await adjustTransaction(c.env, id, parsed.data.account_qbo_id);
+  if (txn.payee) {
+    await insertRule(c.env, {
+      realmId: realm.realm_id,
+      matchField: 'payee',
+      matchOp: 'equals',
+      matchValue: txn.payee,
+      accountQboId: parsed.data.account_qbo_id,
+      source: 'human',
+    });
+  }
+  await audit(c.env, {
+    realm_id: realm.realm_id,
+    actor: 'user',
+    action: 'transaction_adjusted',
+    detail_json: JSON.stringify({ id, account: parsed.data.account_qbo_id, ruleWritten: !!txn.payee }),
+  });
+  return c.json({ ok: true, ruleWritten: !!txn.payee });
 });
 
 app.post('/webhook/qbo', handleWebhook);

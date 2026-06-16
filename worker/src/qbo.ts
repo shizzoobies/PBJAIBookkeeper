@@ -92,3 +92,25 @@ export async function query<T = unknown>(env: Env, realm: RealmRow, sql: string)
   }
   return (await res.json()) as T;
 }
+
+interface QboQueryResponse<T> {
+  QueryResponse?: Record<string, T[] | number>;
+}
+
+// Paginated query over a QBO entity (e.g. 'Account', 'Purchase'). `fromEntity`
+// is a fixed entity name from our code, never user input.
+export async function queryAll<T = unknown>(env: Env, realm: RealmRow, fromEntity: string): Promise<T[]> {
+  const pageSize = 100;
+  let start = 1;
+  const all: T[] = [];
+  for (;;) {
+    const sql = `SELECT * FROM ${fromEntity} STARTPOSITION ${start} MAXRESULTS ${pageSize}`;
+    const res = await query<QboQueryResponse<T>>(env, realm, sql);
+    const block = res.QueryResponse?.[fromEntity];
+    const page = Array.isArray(block) ? block : [];
+    all.push(...page);
+    if (page.length < pageSize) break;
+    start += pageSize;
+  }
+  return all;
+}
