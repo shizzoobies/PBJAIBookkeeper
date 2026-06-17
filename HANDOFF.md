@@ -7,9 +7,9 @@ _Last updated: 2026-06-16._ This is the cold-start guide: read `CLAUDE.md` (buil
 | Phase | State |
 |---|---|
 | **Phase 0 — Foundation** (OAuth, self-rotating token refresh, D1, QBO query) | ✅ **Done, gate passed** |
-| **Phase 1 — Read / classify / reconcile / dashboard** | Stages 1–4 ✅ built & deployed · Stage 5: Access ✅ live · **gate-test walkthrough remaining** |
+| **Phase 1 — Read / classify / reconcile / dashboard** | ✅ **Done, gate passed** — stages 1–5, Access live, security-hardened |
 
-**Cloudflare Access is now live on the dashboard** (One-time PIN; owner tested login 2026-06-16, works). **The only remaining work for the Phase 1 gate is the non-technical gate-test walkthrough.** Everything else is built, deployed, and proven on the QuickBooks sandbox.
+**Phase 1 is complete and gate-passed (2026-06-16).** Cloudflare Access is live (One-time PIN); the owner walked all four screens (Home → Review → Reconcile → Reports) end-to-end with no issues, and the API is security-hardened (BFF + shared secret, see below). The sandbox test build meets its Definition of Done. Next up is **Phase 2** (write-back to QBO, production keys + Intuit assessment, multi-realm, Plaid) — plus, optionally, a later AI-categorization test pass by the firm's client.
 
 ## Live resources
 
@@ -53,11 +53,11 @@ _Last updated: 2026-06-16._ This is the cold-start guide: read `CLAUDE.md` (buil
 | `GET /api/reports/pnl?from=&to=`, `GET /api/reports/balance-sheet?to=` | reports |
 | Cron `0 * * * *` | token refresh sweep |
 
-## ⏭️ NEXT — Stage 5 (needs the owner)
+## ✅ Stage 5 — DONE (2026-06-16)
 
-**1. Add Cloudflare Access to the dashboard.** ✅ **Done (2026-06-16).** Zero Trust → Access → Applications → Self-hosted for `ai-bookkeeper-dashboard.pages.dev`, Allow policy on emails `asoalexander@gmail.com` + `alex@mbsdoc.com`, One-time PIN login. Owner tested the email-link login — works.
+**1. Add Cloudflare Access to the dashboard.** ✅ **Done.** Zero Trust → Access → Applications → Self-hosted for `ai-bookkeeper-dashboard.pages.dev`, Allow policy on emails `asoalexander@gmail.com` + `alex@mbsdoc.com`, One-time PIN login. Owner tested the email-link login — works.
 
-**2. Non-technical gate test.** ⬅️ **The remaining work.** Open https://ai-bookkeeper-dashboard.pages.dev, log in via the email link, and confirm a non-technical user can, with no instructions:
+**2. Non-technical gate test.** ✅ **Passed.** The owner logged in and clicked through all four screens end-to-end with no issues — the flow a non-technical user follows, with no instructions:
 - See the connected company + a "needs your review" count on Home.
 - Open **Review**, see transactions with AI categories + a plain confidence signal, **approve** some and **adjust** one.
 - Open **Reconciliation**, pick a period, upload a bank CSV, and read the three buckets + flags.
