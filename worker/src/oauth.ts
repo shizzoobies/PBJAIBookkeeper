@@ -8,25 +8,28 @@ import { upsertRealmOnConnect, audit } from './db';
 const OAUTH_STATE_TTL_SECONDS = 600;
 const STATE_PREFIX = 'oauth_state:';
 
-// Error from the Intuit token endpoint, carrying enough to tell a permanent
-// auth failure (invalid_grant) from a transient one.
+// Error from the Intuit token endpoint. Stores only the HTTP status and the
+// parsed error code — never the raw response body — so nothing sensitive can
+// reach logs (M1). It still carries enough to tell a permanent auth failure
+// (invalid_grant) from a transient one.
 export class IntuitOAuthError extends Error {
   readonly status: number;
-  readonly body: string;
+  readonly errorCode: string;
   constructor(status: number, body: string) {
-    super(`Intuit token request failed (${status}): ${body}`);
+    const errorCode = IntuitOAuthError.parseErrorCode(body);
+    super(`Intuit token request failed (status ${status}, error ${errorCode})`);
     this.name = 'IntuitOAuthError';
     this.status = status;
-    this.body = body;
+    this.errorCode = errorCode;
   }
   isPermanent(): boolean {
     // The refresh token is no longer valid (expired/revoked) — re-auth required.
     return this.errorCode === 'invalid_grant';
   }
   // Intuit error code parsed from the response body (e.g. 'invalid_grant').
-  get errorCode(): string {
+  private static parseErrorCode(body: string): string {
     try {
-      const parsed = JSON.parse(this.body) as { error?: unknown };
+      const parsed = JSON.parse(body) as { error?: unknown };
       return typeof parsed.error === 'string' ? parsed.error : 'unknown';
     } catch {
       return 'unparseable';
@@ -108,6 +111,13 @@ const callbackSchema = z.object({
   realmId: z.string().min(1),
 });
 
+// Absolute URL back into the dashboard UI. Falls back to a relative path
+// (Worker origin) if DASHBOARD_URL isn't configured.
+function dashboardUrl(env: Env, path: string): string {
+  const base = env.DASHBOARD_URL?.replace(/\/+$/, '') ?? '';
+  return `${base}${path}`;
+}
+
 export const handleCallback = async (c: Context<{ Bindings: Env }>) => {
   const parsed = callbackSchema.safeParse({
     code: c.req.query('code'),
@@ -115,18 +125,35 @@ export const handleCallback = async (c: Context<{ Bindings: Env }>) => {
     realmId: c.req.query('realmId'),
   });
   if (!parsed.success) {
-    const providerError = c.req.query('error');
-    return c.json({ error: 'invalid_callback', detail: providerError ?? 'missing code/state/realmId' }, 400);
+    // L3: redirect into the UI with a friendly code instead of raw JSON.
+    return c.redirect(dashboardUrl(c.env, '/?error=connect_failed'), 302);
   }
   const { code, state, realmId } = parsed.data;
 
   // CSRF: the returned state must match one we issued.
   const stateKey = STATE_PREFIX + state;
   const known = await c.env.COA_CACHE.get(stateKey);
-  if (!known) return c.json({ error: 'invalid_state' }, 400);
+  if (!known) return c.redirect(dashboardUrl(c.env, '/?error=connect_expired'), 302);
   await c.env.COA_CACHE.delete(stateKey);
 
-  const tok = await exchangeCodeForTokens(c.env, code);
+  let tok: IntuitTokenResponse;
+  try {
+    tok = await exchangeCodeForTokens(c.env, code);
+  } catch (err) {
+    // L3 + M1: audit only the parsed error code, never the raw body; send the
+    // user back to a friendly error state.
+    await audit(c.env, {
+      realm_id: realmId,
+      actor: 'system',
+      action: 'company_connect_failed',
+      detail_json: JSON.stringify(
+        err instanceof IntuitOAuthError
+          ? { status: err.status, error: err.errorCode }
+          : { error: 'network_or_unknown' },
+      ),
+    });
+    return c.redirect(dashboardUrl(c.env, '/?error=connect_failed'), 302);
+  }
   const now = Math.floor(Date.now() / 1000);
 
   const [accessTokenEnc, refreshTokenEnc, companyName] = await Promise.all([
@@ -149,5 +176,5 @@ export const handleCallback = async (c: Context<{ Bindings: Env }>) => {
     detail_json: JSON.stringify({ companyName }),
   });
 
-  return c.redirect('/?connected=1', 302);
+  return c.redirect(dashboardUrl(c.env, '/?connected=1'), 302);
 };

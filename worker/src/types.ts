@@ -12,10 +12,12 @@ export interface Env {
   TOKEN_ENC_KEY: string;
   QBO_WEBHOOK_VERIFIER?: string; // Phase 1
   ANTHROPIC_API_KEY?: string; // Phase 1
+  BFF_SHARED_SECRET?: string; // Phase 1 hardening: secret the Pages BFF must present on /api/* + /oauth/connect
 
   // Vars (wrangler.toml [vars])
   QBO_ENVIRONMENT: string; // 'sandbox' | 'production'
   REFRESH_WINDOW_SECONDS?: string;
+  DASHBOARD_URL?: string; // Pages origin — CORS scope + OAuth redirect target
 }
 
 // Row shape of the `realms` table.

@@ -88,7 +88,8 @@ export async function query<T = unknown>(env: Env, realm: RealmRow, sql: string)
     headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
   });
   if (!res.ok) {
-    throw new Error(`QBO query failed (${res.status}): ${await res.text()}`);
+    // M1: never echo the raw Intuit response body into logs/errors.
+    throw new Error(`QBO query failed (status ${res.status})`);
   }
   return (await res.json()) as T;
 }
@@ -128,7 +129,8 @@ export async function report<T = unknown>(
   const url = `${apiBase(env)}/v3/company/${realm.realm_id}/reports/${reportName}?${qs}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' } });
   if (!res.ok) {
-    throw new Error(`QBO report ${reportName} failed (${res.status}): ${await res.text()}`);
+    // M1: never echo the raw Intuit response body into logs/errors.
+    throw new Error(`QBO report ${reportName} failed (status ${res.status})`);
   }
   return (await res.json()) as T;
 }

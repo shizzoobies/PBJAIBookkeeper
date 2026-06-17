@@ -1,0 +1,12 @@
+# Cloudflare Pages project config (dashboard). Lets `wrangler pages deploy` (run
+# from this directory) pick up ./dist and the ./functions BFF automatically, and
+# uses this config instead of the Worker's root wrangler.toml.
+name = "ai-bookkeeper-dashboard"
+compatibility_date = "2025-06-01"
+pages_build_output_dir = "dist"
+
+# Worker origin the BFF proxies to. The BFF shared secret is a Pages *secret*
+# (`wrangler pages secret put BFF_SHARED_SECRET --project-name=ai-bookkeeper-dashboard`),
+# never committed here.
+[vars]
+WORKER_ORIGIN = "https://ai-bookkeeper.tgqhg6kf4g.workers.dev"

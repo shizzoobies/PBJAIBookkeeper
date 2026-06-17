@@ -1,6 +1,8 @@
-const API_BASE =
-  (import.meta.env.VITE_API_BASE as string | undefined) ||
-  'https://ai-bookkeeper.tgqhg6kf4g.workers.dev'
+// Same-origin by default: the dashboard calls its own Pages BFF (functions/),
+// which Cloudflare Access gates and which proxies to the Worker with the shared
+// secret — the browser never talks to the Worker directly. Override only for
+// local dev (see .env.example).
+const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 
 export { API_BASE }
 
@@ -39,7 +41,7 @@ import type {
 } from './types'
 
 export const api = {
-  status: () => apiFetch<StatusResponse>('/'),
+  status: () => apiFetch<StatusResponse>('/api/status'),
   company: () => apiFetch<CompanyResponse>('/api/company'),
   accounts: () => apiFetch<AccountsResponse>('/api/accounts'),
   sync: () => apiFetch<SyncResponse>('/api/sync', { method: 'POST' }),

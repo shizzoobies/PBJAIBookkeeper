@@ -7,9 +7,9 @@ _Last updated: 2026-06-16._ This is the cold-start guide: read `CLAUDE.md` (buil
 | Phase | State |
 |---|---|
 | **Phase 0 — Foundation** (OAuth, self-rotating token refresh, D1, QBO query) | ✅ **Done, gate passed** |
-| **Phase 1 — Read / classify / reconcile / dashboard** | Stages 1–4 ✅ built & deployed · **Stage 5 remaining** |
+| **Phase 1 — Read / classify / reconcile / dashboard** | Stages 1–4 ✅ built & deployed · Stage 5: Access ✅ live · **gate-test walkthrough remaining** |
 
-**The only remaining work for the Phase 1 gate is Stage 5: put Cloudflare Access in front of the dashboard, then run the non-technical gate test.** Everything else is built, deployed, and proven on the QuickBooks sandbox.
+**Cloudflare Access is now live on the dashboard** (One-time PIN; owner tested login 2026-06-16, works). **The only remaining work for the Phase 1 gate is the non-technical gate-test walkthrough.** Everything else is built, deployed, and proven on the QuickBooks sandbox.
 
 ## Live resources
 
@@ -24,7 +24,7 @@ _Last updated: 2026-06-16._ This is the cold-start guide: read `CLAUDE.md` (buil
 | Cron | hourly token-refresh sweep (`0 * * * *`) |
 | Connected sandbox realm | `9341457287450454` — "Sandbox Company US 64f6", status `active` |
 
-**Secrets** (set via `wrangler secret put`; values live only in Cloudflare): `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_REDIRECT_URI`, `TOKEN_ENC_KEY`, `ANTHROPIC_API_KEY` — all set.
+**Secrets** (set via `wrangler secret put`; values live only in Cloudflare): `QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_REDIRECT_URI`, `TOKEN_ENC_KEY`, `ANTHROPIC_API_KEY` — all set. **Phase 1 hardening added `BFF_SHARED_SECRET`** — now set on the **Worker** *and* the **Pages** project (same value); gating is **live as of 2026-06-16**.
 
 **Intuit:** app is under the owner's **personal** Intuit account using **Development (sandbox)** keys. Redirect URI registered: `https://ai-bookkeeper.tgqhg6kf4g.workers.dev/oauth/callback`. A sandbox company (QBO Plus, US) exists. For production the app must move to the **firm's** account and pass Intuit's app assessment.
 
@@ -55,9 +55,9 @@ _Last updated: 2026-06-16._ This is the cold-start guide: read `CLAUDE.md` (buil
 
 ## ⏭️ NEXT — Stage 5 (needs the owner)
 
-**1. Add Cloudflare Access to the dashboard.** Cloudflare **Zero Trust** dashboard → **Access → Applications → Add an application → Self-hosted**. Application domain: `ai-bookkeeper-dashboard.pages.dev`. Add a policy: **Action: Allow**, **Include → Emails →** `asoalexander@gmail.com` and `alex@mbsdoc.com`. Login method: **One-time PIN** (email link, no password, no IdP needed). (Zero Trust free plan is sufficient.)
+**1. Add Cloudflare Access to the dashboard.** ✅ **Done (2026-06-16).** Zero Trust → Access → Applications → Self-hosted for `ai-bookkeeper-dashboard.pages.dev`, Allow policy on emails `asoalexander@gmail.com` + `alex@mbsdoc.com`, One-time PIN login. Owner tested the email-link login — works.
 
-**2. Non-technical gate test.** Open https://ai-bookkeeper-dashboard.pages.dev, log in via the email link, and confirm a non-technical user can, with no instructions:
+**2. Non-technical gate test.** ⬅️ **The remaining work.** Open https://ai-bookkeeper-dashboard.pages.dev, log in via the email link, and confirm a non-technical user can, with no instructions:
 - See the connected company + a "needs your review" count on Home.
 - Open **Review**, see transactions with AI categories + a plain confidence signal, **approve** some and **adjust** one.
 - Open **Reconciliation**, pick a period, upload a bank CSV, and read the three buckets + flags.
@@ -65,13 +65,38 @@ _Last updated: 2026-06-16._ This is the cold-start guide: read `CLAUDE.md` (buil
 
 A sample statement CSV for testing reconciliation lives in `.omc/recon-test.mjs` (gitignored) — it targets the May sandbox transactions.
 
-## Phase 1 hardening backlog (before production / real keys)
+## Phase 1 hardening (before production / real keys)
 
-Tracked in `docs/security-review-phase0.md`. The important ones:
-- **H1/H2 + CORS:** the Worker's `/api/*` and `/oauth/connect` are **unauthenticated** and CORS is `*` (open). Acceptable for an isolated sandbox test; **must gate before real keys** — put the dashboard's API calls through an Access-authenticated path (service token / Pages Functions BFF) and restrict CORS to the Pages origin.
-- **M1:** redact raw Intuit error bodies from Worker logs (audit log is already clean).
-- **M2:** serialize per-realm token refresh with a lock (currently a lightweight re-read mitigation only).
-- Write-back to QBO and Plaid ingestion are **out of scope** (Phase 2).
+Tracked in `docs/security-review-phase0.md`.
+
+**✅ Done & live (2026-06-16) — verified: Worker `/api/*` returns 401 without the secret; `/` health still 200; Pages `/api/*` → 302 Access:**
+- **H1/H2 + CORS** — `/api/*` and `/oauth/connect` are now gated behind a **shared secret** (`X-BFF-Secret`, fail-closed) that only the dashboard's **Pages Functions BFF** (`dashboard/functions/`) holds. The SPA calls **same-origin** `/api/*`; the BFF (behind Cloudflare Access) proxies to the Worker with the secret. Worker CORS is locked to `DASHBOARD_URL`. The browser never reaches the Worker directly. Independent review of the diff: no CRITICAL/HIGH findings.
+- **M1** — raw Intuit/QBO response bodies no longer reach logs/errors.
+- **L3** — OAuth callback redirects into the dashboard (`?connected=1` / `?error=…`) instead of raw JSON.
+
+**Still open (fine for single-realm sandbox; address before real keys):**
+- **M2** — serialize per-realm token refresh with a lock / Durable Object (today: lightweight re-read mitigation).
+- **L1** — multi-tenant realm selection (the API still uses `realms[0]`); required before connecting >1 company.
+- Belt-and-suspenders for real keys: validate the Access JWT (`Cf-Access-Jwt-Assertion`) inside the BFF; rotate `BFF_SHARED_SECRET` periodically.
+- Write-back to QBO and Plaid ingestion remain **out of scope** (Phase 2).
+
+### Deploy the hardening — ✅ done 2026-06-16 (commands kept for re-deploys / rotation)
+
+```bash
+# 1) Generate the shared secret ONCE; use the SAME value in both places below.
+openssl rand -base64 32
+
+# 2) Worker (from repo root): paste the value at the prompt, then deploy.
+wrangler secret put BFF_SHARED_SECRET
+npm run deploy
+
+# 3) Pages: set the SAME value, then build + deploy the dashboard (with its BFF).
+cd dashboard
+wrangler pages secret put BFF_SHARED_SECRET --project-name=ai-bookkeeper-dashboard
+npm run build && wrangler pages deploy
+```
+
+The Worker fails **closed** (`/api/*` → 503) until its secret is set, and the BFF returns 503 until the Pages secret is set — so set both and deploy both. `WORKER_ORIGIN` and `DASHBOARD_URL` are committed in the two `wrangler.toml`s; only the secret is manual.
 
 ## Dev commands
 
@@ -83,9 +108,9 @@ npm run db:migrate:remote        # apply migrations to remote D1
 wrangler tail                    # live logs
 wrangler secret list             # confirm secrets (names only)
 
-# Dashboard
+# Dashboard (has its own dashboard/wrangler.toml: pages_build_output_dir + the functions/ BFF)
 cd dashboard && npm install && npm run build
-wrangler pages deploy dashboard/dist --project-name=ai-bookkeeper-dashboard --commit-dirty=true
+wrangler pages deploy            # auto-bundles ./dist + ./functions; project name comes from the config
 
 # Re-discover resource IDs if needed
 wrangler d1 list ; wrangler kv namespace list
@@ -94,5 +119,6 @@ wrangler d1 list ; wrangler kv namespace list
 ## Gotchas
 
 - A temporary every-minute cron (`* * * * *`) was used to prove the refresh gate, then reverted to hourly (`0 * * * *`).
-- `wrangler pages deploy` from the repo root prints "Ignoring configuration file" (it sees the Worker's `wrangler.toml`) — harmless; it still deploys `dashboard/dist`.
+- The dashboard now has its **own** `dashboard/wrangler.toml` (`pages_build_output_dir = "dist"`), so deploy with `wrangler pages deploy` **from `dashboard/`** — it bundles `dist` + the `functions/` BFF and no longer prints "Ignoring configuration file."
+- Pages Functions live in `dashboard/functions/` (BFF proxy). Validate they compile without deploying via `wrangler pages functions build dashboard/functions --outfile <tmp>` from the repo root.
 - The reconcile CSV parser accepts `MM/DD/YYYY` and `YYYY-MM-DD` (a swapped month/day bug was found and fixed during Stage 3 testing).

@@ -8,6 +8,10 @@ compatibility_date = "2025-06-01"
 QBO_ENVIRONMENT = "sandbox"
 # Cron refreshes any access token expiring within this many seconds.
 REFRESH_WINDOW_SECONDS = "3600"
+# Dashboard (Pages) origin. Scopes CORS and is the OAuth callback redirect target.
+# The BFF shared secret is a Worker *secret* (`wrangler secret put BFF_SHARED_SECRET`),
+# never committed here.
+DASHBOARD_URL = "https://ai-bookkeeper-dashboard.pages.dev"
 
 [[d1_databases]]
 binding = "DB"

@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { Context, Next } from 'hono';
 import { cors } from 'hono/cors';
 import type { Env } from './types';
 import { handleConnect, handleCallback } from './oauth';
@@ -19,13 +20,29 @@ import {
 } from './db';
 import { runTokenRefreshSweep } from './cron';
 
-const app = new Hono<{ Bindings: Env }>();
+type AppContext = Context<{ Bindings: Env }>;
 
-// Allow the dashboard (Pages, a separate origin) to call the Worker
-// (the status route `/` and all `/api/*` endpoints).
-app.use('*', cors());
+// Constant-time compare so a wrong secret can't be probed byte-by-byte.
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
 
-app.get('/', async (c) => {
+// Gate /api/* and /oauth/connect behind the secret the Pages BFF presents.
+// Fails closed if the secret isn't configured, so a half-finished deploy is
+// locked rather than open.
+async function bffAuth(c: AppContext, next: Next) {
+  const expected = c.env.BFF_SHARED_SECRET;
+  if (!expected) return c.json({ error: 'auth_not_configured' }, 503);
+  if (!safeEqual(c.req.header('X-BFF-Secret') ?? '', expected)) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+  await next();
+}
+
+async function statusHandler(c: AppContext) {
   const realms = await listActiveRealms(c.env);
   return c.json({
     service: 'ai-bookkeeper',
@@ -33,7 +50,33 @@ app.get('/', async (c) => {
     environment: c.env.QBO_ENVIRONMENT,
     connectedCompanies: realms.length,
   });
-});
+}
+
+const app = new Hono<{ Bindings: Env }>();
+
+// The browser only ever calls the same-origin Pages BFF, which proxies here with
+// the shared secret. CORS is locked to the dashboard origin as defense-in-depth;
+// any stray cross-origin browser call without the secret is rejected by bffAuth.
+app.use(
+  '*',
+  cors({
+    origin: (origin, c) => {
+      const allowed = (c.env as Env).DASHBOARD_URL;
+      return allowed && origin === allowed ? origin : undefined;
+    },
+    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'X-BFF-Secret'],
+  }),
+);
+
+// Secret-gate the data paths and OAuth initiation. `/` (health),
+// `/oauth/callback` (state-protected) and `/webhook/qbo` (signature-protected)
+// stay directly reachable.
+app.use('/api/*', bffAuth);
+app.use('/oauth/connect', bffAuth);
+
+app.get('/', statusHandler); // public health check (no metered reads, no sensitive data)
+app.get('/api/status', statusHandler); // same payload via the BFF, for the dashboard
 
 app.get('/oauth/connect', handleConnect);
 app.get('/oauth/callback', handleCallback);
@@ -179,6 +222,14 @@ app.get('/api/reports/balance-sheet', async (c) => {
 });
 
 app.post('/webhook/qbo', handleWebhook);
+
+// Catch-all error handler. err.message is redacted (qbo.ts/oauth.ts no longer
+// embed raw Intuit bodies), so logging name + message is safe; the client gets a
+// generic error.
+app.onError((err, c) => {
+  console.error('request_error', err.name, err.message);
+  return c.json({ error: 'internal_error' }, 500);
+});
 
 export default {
   fetch: (request: Request, env: Env, ctx: ExecutionContext) => app.fetch(request, env, ctx),

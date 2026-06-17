@@ -23,6 +23,27 @@ export default function App() {
   const [screen, setScreen] = React.useState<Screen>('home')
   const { toasts, push, dismiss } = useToasts()
 
+  // Surface the OAuth round-trip result (the Worker redirects back here with
+  // ?connected=1 or ?error=…), then clean the query string from the URL.
+  React.useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('connected') === '1') {
+      push('success', 'QuickBooks connected. You’re all set.')
+    }
+    const err = params.get('error')
+    if (err) {
+      push(
+        'error',
+        err === 'connect_expired'
+          ? 'That connection link expired. Please click Connect again.'
+          : 'We couldn’t finish connecting QuickBooks. Please try again.',
+      )
+    }
+    if (params.has('connected') || params.has('error')) {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [push])
+
   return (
     <div className="min-h-dvh flex flex-col">
       {/* Top navigation */}
