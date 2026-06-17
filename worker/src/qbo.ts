@@ -134,3 +134,57 @@ export async function report<T = unknown>(
   }
   return (await res.json()) as T;
 }
+
+// Create a QBO entity (e.g. 'bill', 'purchase', 'vendor'). Writes are free under
+// the read-credit meter. `entity` is a fixed name from our code, never user input.
+export async function createEntity<T = unknown>(
+  env: Env,
+  realm: RealmRow,
+  entity: string,
+  body: unknown,
+): Promise<T> {
+  const token = await getValidAccessToken(env, realm);
+  const url = `${apiBase(env)}/v3/company/${realm.realm_id}/${entity}?minorversion=${QBO_MINOR_VERSION}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`QBO create ${entity} failed (status ${res.status})`);
+  }
+  return (await res.json()) as T;
+}
+
+// Upload a file and attach it to a transaction via QBO's /upload endpoint:
+// multipart with a JSON metadata part (carrying the AttachableRef link) and the
+// binary content part, sharing the same index suffix.
+export async function uploadAttachment(
+  env: Env,
+  realm: RealmRow,
+  args: { entityType: string; entityId: string; fileName: string; contentType: string; bytes: ArrayBuffer },
+): Promise<void> {
+  const token = await getValidAccessToken(env, realm);
+  const metadata = {
+    AttachableRef: [{ EntityRef: { type: args.entityType, value: args.entityId } }],
+    FileName: args.fileName,
+    ContentType: args.contentType,
+  };
+  const form = new FormData();
+  form.append('file_metadata_0', new Blob([JSON.stringify(metadata)], { type: 'application/json' }), 'metadata.json');
+  form.append('file_content_0', new Blob([args.bytes], { type: args.contentType }), args.fileName);
+
+  const url = `${apiBase(env)}/v3/company/${realm.realm_id}/upload?minorversion=${QBO_MINOR_VERSION}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    body: form, // runtime sets multipart/form-data + boundary
+  });
+  if (!res.ok) {
+    throw new Error(`QBO attachment upload failed (status ${res.status})`);
+  }
+}

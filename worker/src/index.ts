@@ -9,6 +9,8 @@ import { query, report } from './qbo';
 import { runSync, type CoaEntry } from './sync';
 import { categorizePending } from './categorize';
 import { reconcile, parseStatementCsv } from './reconcile';
+import { extractDocument } from './extract';
+import { postCapture } from './writeback';
 import {
   listActiveRealms,
   listTransactions,
@@ -219,6 +221,90 @@ app.get('/api/reports/balance-sheet', async (c) => {
   const to = c.req.query('to');
   const data = await report(c.env, realm, 'BalanceSheet', to ? { end_date: to } : {});
   return Response.json(data);
+});
+
+// Encode bytes as base64 in chunks (avoids call-stack limits on large inputs).
+function toBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+// The Workers runtime returns a File for uploaded form parts, but the ambient
+// FormData.get() type is loose — cast to the File-like shape we actually use.
+type UploadedFile = { type: string; name: string; arrayBuffer(): Promise<ArrayBuffer> };
+
+const CAPTURE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']);
+
+const capturePostSchema = z
+  .object({
+    docType: z.enum(['bill', 'purchase']),
+    vendorName: z.string().min(1),
+    txnDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    lines: z
+      .array(z.object({ description: z.string().default(''), amount: z.number().positive(), accountId: z.string().min(1) }))
+      .min(1),
+    paymentType: z.enum(['Cash', 'Check', 'CreditCard']).optional(),
+    paymentAccountId: z.string().optional(),
+  })
+  .refine((d) => d.docType !== 'purchase' || !!d.paymentAccountId, {
+    message: 'paymentAccountId is required for a purchase',
+  });
+
+// Capture (Phase 2 write-back): extract structured data from an uploaded receipt
+// or bill via Claude vision. Read-only — produces a draft for human review.
+app.post('/api/capture/extract', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: 'anthropic_key_not_configured' }, 503);
+
+  const form = await c.req.formData().catch(() => null);
+  const file = form?.get('file') as UploadedFile | string | null | undefined;
+  if (!file || typeof file === 'string') return c.json({ error: 'file_required' }, 400);
+  if (!CAPTURE_TYPES.has(file.type)) return c.json({ error: 'unsupported_file_type', detail: file.type }, 400);
+
+  const buf = await file.arrayBuffer();
+  const raw = await c.env.COA_CACHE.get(`coa:${realm.realm_id}`);
+  const coa: CoaEntry[] = raw ? (JSON.parse(raw) as CoaEntry[]) : [];
+  const draft = await extractDocument(c.env, { mediaType: file.type, dataBase64: toBase64(buf) }, coa);
+  return c.json({ draft });
+});
+
+// Capture: write the reviewed draft to QBO as a Bill/Purchase and attach the
+// source. Gated by WRITEBACK_ENABLED (and bffAuth). Nothing auto-posts — the
+// dashboard calls this only on explicit human approval.
+app.post('/api/capture/post', async (c) => {
+  if (c.env.WRITEBACK_ENABLED !== 'true') return c.json({ error: 'writeback_disabled' }, 403);
+  const realms = await listActiveRealms(c.env);
+  const realm = realms[0];
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'invalid_request' }, 400);
+
+  const payloadRaw = form.get('payload');
+  let payloadObj: unknown;
+  try {
+    payloadObj = JSON.parse(typeof payloadRaw === 'string' ? payloadRaw : '');
+  } catch {
+    return c.json({ error: 'invalid_payload' }, 400);
+  }
+  const parsed = capturePostSchema.safeParse(payloadObj);
+  if (!parsed.success) return c.json({ error: 'invalid_request', detail: parsed.error.issues[0]?.message }, 400);
+
+  const file = form.get('file') as UploadedFile | string | null;
+  const fileArg =
+    file && typeof file !== 'string'
+      ? { fileName: file.name, contentType: file.type, bytes: await file.arrayBuffer() }
+      : undefined;
+
+  const result = await postCapture(c.env, realm, parsed.data, fileArg);
+  return c.json({ ok: true, ...result });
 });
 
 app.post('/webhook/qbo', handleWebhook);

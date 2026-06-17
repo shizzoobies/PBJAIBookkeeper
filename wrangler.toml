@@ -12,6 +12,9 @@ REFRESH_WINDOW_SECONDS = "3600"
 # The BFF shared secret is a Worker *secret* (`wrangler secret put BFF_SHARED_SECRET`),
 # never committed here.
 DASHBOARD_URL = "https://ai-bookkeeper-dashboard.pages.dev"
+# Enables QBO write-back (receipt/bill capture → Bill/Purchase). ON for the sandbox
+# test; keep OFF (unset) for production until Phase 2 sign-off.
+WRITEBACK_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"

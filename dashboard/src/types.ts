@@ -159,3 +159,41 @@ export function confidenceBand(c: number | null): ConfidenceBand {
   if (c >= 0.6) return 'Likely'
   return 'Take a look'
 }
+
+// ── Capture (receipt/bill → QuickBooks) ───────────────────────────────────────
+
+export interface CaptureLine {
+  description: string
+  amount: number
+  accountId: string | null
+}
+
+export interface CaptureDraft {
+  suggestedDocType: 'bill' | 'purchase'
+  vendorName: string | null
+  txnDate: string | null
+  total: number | null
+  currency: string | null
+  lines: CaptureLine[]
+}
+
+export interface CaptureExtractResponse {
+  draft: CaptureDraft
+}
+
+export interface CapturePostPayload {
+  docType: 'bill' | 'purchase'
+  vendorName: string
+  txnDate: string
+  lines: Array<{ description: string; amount: number; accountId: string }>
+  paymentType?: 'Cash' | 'Check' | 'CreditCard'
+  paymentAccountId?: string
+}
+
+export interface CapturePostResult {
+  ok: true
+  entityType: 'Bill' | 'Purchase'
+  entityId: string
+  vendor: string
+  attached: boolean
+}

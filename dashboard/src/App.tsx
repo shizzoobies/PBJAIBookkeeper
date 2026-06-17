@@ -3,9 +3,10 @@ import { HomeScreen } from './screens/HomeScreen'
 import { ReviewScreen } from './screens/ReviewScreen'
 import { ReconcileScreen } from './screens/ReconcileScreen'
 import { ReportsScreen } from './screens/ReportsScreen'
+import { CaptureScreen } from './screens/CaptureScreen'
 import { ToastRegion, useToasts } from './components/Toast'
 
-type Screen = 'home' | 'review' | 'reconcile' | 'reports'
+type Screen = 'home' | 'review' | 'capture' | 'reconcile' | 'reports'
 
 interface NavItem {
   id: Screen
@@ -15,6 +16,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { id: 'home',      label: 'Home' },
   { id: 'review',    label: 'Review' },
+  { id: 'capture',   label: 'Capture' },
   { id: 'reconcile', label: 'Reconcile' },
   { id: 'reports',   label: 'Reports' },
 ]
@@ -95,6 +97,9 @@ export default function App() {
         )}
         {screen === 'review' && (
           <ReviewScreen pushToast={push} />
+        )}
+        {screen === 'capture' && (
+          <CaptureScreen pushToast={push} />
         )}
         {screen === 'reconcile' && (
           <ReconcileScreen pushToast={push} />

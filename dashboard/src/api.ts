@@ -25,6 +25,23 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
+// Multipart upload (file + optional JSON payload). Must NOT set Content-Type —
+// the browser sets multipart/form-data with the boundary.
+async function apiUpload<T>(path: string, form: FormData): Promise<T> {
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', body: form })
+  if (!res.ok) {
+    let message = `${res.status} ${res.statusText}`
+    try {
+      const body = (await res.json()) as { error?: string; detail?: string }
+      message = body.detail ?? body.error ?? message
+    } catch {
+      // ignore
+    }
+    throw new Error(message)
+  }
+  return res.json() as Promise<T>
+}
+
 // ── Endpoints ────────────────────────────────────────────────────────────────
 
 import type {
@@ -38,6 +55,9 @@ import type {
   AdjustResponse,
   ReconcileResponse,
   QBOReport,
+  CaptureExtractResponse,
+  CapturePostPayload,
+  CapturePostResult,
 } from './types'
 
 export const api = {
@@ -72,4 +92,17 @@ export const api = {
 
   balanceSheet: (to: string) =>
     apiFetch<QBOReport>(`/api/reports/balance-sheet?to=${to}`),
+
+  captureExtract: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiUpload<CaptureExtractResponse>('/api/capture/extract', form)
+  },
+
+  capturePost: (payload: CapturePostPayload, file: File | null) => {
+    const form = new FormData()
+    form.append('payload', JSON.stringify(payload))
+    if (file) form.append('file', file)
+    return apiUpload<CapturePostResult>('/api/capture/post', form)
+  },
 }

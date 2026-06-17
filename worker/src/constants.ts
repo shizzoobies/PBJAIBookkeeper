@@ -30,6 +30,10 @@ export const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 export const ANTHROPIC_VERSION = '2023-06-01';
 // Fast classification model (spec §7), verified against the Claude API reference.
 export const CLASSIFIER_MODEL = 'claude-haiku-4-5';
+// Document-extraction model for receipt/bill capture (image vision + PDF). Haiku
+// 4.5 supports vision; verified against the Claude API reference. Swap to a larger
+// model here if messy bills need it.
+export const EXTRACT_MODEL = 'claude-haiku-4-5';
 // At/above this confidence a suggestion is "ready for one-click approval";
 // below it, it needs a closer look. A human always approves in this test build.
 export const CONFIDENCE_THRESHOLD = 0.85;

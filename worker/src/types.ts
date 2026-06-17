@@ -18,6 +18,7 @@ export interface Env {
   QBO_ENVIRONMENT: string; // 'sandbox' | 'production'
   REFRESH_WINDOW_SECONDS?: string;
   DASHBOARD_URL?: string; // Pages origin — CORS scope + OAuth redirect target
+  WRITEBACK_ENABLED?: string; // 'true' enables QBO write-back (capture → Bill/Purchase); sandbox only for now
 }
 
 // Row shape of the `realms` table.
