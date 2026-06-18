@@ -83,13 +83,13 @@ export default function App() {
           {/* Brand */}
           <div className="flex items-center gap-2 mr-6 shrink-0">
             <span
-              className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-800 text-white text-xs font-bold select-none"
+              className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-800 text-base select-none"
               aria-hidden="true"
             >
-              AI
+              🥪
             </span>
             <span className="text-sm font-semibold text-slate-700 hidden sm:block">
-              AI Bookkeeper
+              Robo PB&J
             </span>
           </div>
 
