@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Context, Next } from 'hono';
 import { cors } from 'hono/cors';
-import type { Env } from './types';
+import type { Env, RealmRow } from './types';
 import { handleConnect, handleCallback } from './oauth';
 import { handleWebhook } from './webhook';
 import { z } from 'zod';
@@ -11,6 +11,7 @@ import { categorizePending } from './categorize';
 import { reconcile, parseStatementCsv } from './reconcile';
 import { extractDocument } from './extract';
 import { postCapture } from './writeback';
+import { seedDemoData } from './seed';
 import {
   listActiveRealms,
   listTransactions,
@@ -54,6 +55,17 @@ async function statusHandler(c: AppContext) {
   });
 }
 
+// Pick the company a request targets: the X-Company-Id header (set by the
+// dashboard's company switcher) if it matches a connected realm, else the first.
+function resolveRealm(c: AppContext, realms: RealmRow[]): RealmRow | undefined {
+  const requested = c.req.header('X-Company-Id');
+  if (requested) {
+    const match = realms.find((r) => r.realm_id === requested);
+    if (match) return match;
+  }
+  return realms[0];
+}
+
 const app = new Hono<{ Bindings: Env }>();
 
 // The browser only ever calls the same-origin Pages BFF, which proxies here with
@@ -80,13 +92,21 @@ app.use('/oauth/connect', bffAuth);
 app.get('/', statusHandler); // public health check (no metered reads, no sensitive data)
 app.get('/api/status', statusHandler); // same payload via the BFF, for the dashboard
 
+// List connected companies for the dashboard's company switcher.
+app.get('/api/companies', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  return c.json({
+    companies: realms.map((r) => ({ realmId: r.realm_id, companyName: r.company_name, status: r.status })),
+  });
+});
+
 app.get('/oauth/connect', handleConnect);
 app.get('/oauth/callback', handleCallback);
 
 // Proves the Phase 0 loop: fetch CompanyInfo for the connected realm via query().
 app.get('/api/company', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const data = await query(c.env, realm, 'SELECT * FROM CompanyInfo');
   return Response.json(data);
@@ -96,7 +116,7 @@ app.get('/api/company', async (c) => {
 // the test; production drives this from the webhook/cron, never by polling.
 app.post('/api/sync', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const result = await runSync(c.env, realm);
   return c.json({ ok: true, ...result });
@@ -105,7 +125,7 @@ app.post('/api/sync', async (c) => {
 // Review-queue data: synced transactions (optionally filtered by review_status).
 app.get('/api/transactions', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const status = c.req.query('status');
   const transactions = await listTransactions(c.env, realm.realm_id, status);
@@ -115,7 +135,7 @@ app.get('/api/transactions', async (c) => {
 // Run categorization (rules pass, then Claude for the remainder) over pending txns.
 app.post('/api/categorize', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: 'anthropic_key_not_configured' }, 503);
   const result = await categorizePending(c.env, realm);
@@ -125,7 +145,7 @@ app.post('/api/categorize', async (c) => {
 // Approve a transaction's current/suggested category.
 app.post('/api/transactions/:id/approve', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'invalid_id' }, 400);
@@ -144,7 +164,7 @@ app.post('/api/transactions/:id/approve', async (c) => {
 // Adjust a transaction's category; learn a rule so the same payee is deterministic next time.
 app.post('/api/transactions/:id/adjust', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const id = Number(c.req.param('id'));
   if (!Number.isInteger(id)) return c.json({ error: 'invalid_id' }, 400);
@@ -176,7 +196,7 @@ app.post('/api/transactions/:id/adjust', async (c) => {
 // bank-statement CSV; return matched / book-only / statement-only buckets + flags.
 app.post('/api/reconcile', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const parsed = z
     .object({
@@ -196,7 +216,7 @@ app.post('/api/reconcile', async (c) => {
 // Chart of accounts (from KV) so the dashboard can show category names.
 app.get('/api/accounts', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const raw = await c.env.COA_CACHE.get(`coa:${realm.realm_id}`);
   const accounts: CoaEntry[] = raw ? (JSON.parse(raw) as CoaEntry[]) : [];
@@ -206,7 +226,7 @@ app.get('/api/accounts', async (c) => {
 // Reports — read on demand (never polled), per the read-discipline constraint.
 app.get('/api/reports/pnl', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const from = c.req.query('from');
   const to = c.req.query('to');
@@ -216,7 +236,7 @@ app.get('/api/reports/pnl', async (c) => {
 
 app.get('/api/reports/balance-sheet', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const to = c.req.query('to');
   const data = await report(c.env, realm, 'BalanceSheet', to ? { end_date: to } : {});
@@ -259,7 +279,7 @@ const capturePostSchema = z
 // or bill via Claude vision. Read-only — produces a draft for human review.
 app.post('/api/capture/extract', async (c) => {
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: 'anthropic_key_not_configured' }, 503);
 
@@ -281,7 +301,7 @@ app.post('/api/capture/extract', async (c) => {
 app.post('/api/capture/post', async (c) => {
   if (c.env.WRITEBACK_ENABLED !== 'true') return c.json({ error: 'writeback_disabled' }, 403);
   const realms = await listActiveRealms(c.env);
-  const realm = realms[0];
+  const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
 
   const form = await c.req.formData().catch(() => null);
@@ -304,6 +324,17 @@ app.post('/api/capture/post', async (c) => {
       : undefined;
 
   const result = await postCapture(c.env, realm, parsed.data, fileArg);
+  return c.json({ ok: true, ...result });
+});
+
+// Demo helper: bulk-create varied expenses (with vendors) in the target company
+// and return a matching bank CSV. Gated by WRITEBACK_ENABLED — sandbox only.
+app.post('/api/dev/seed', async (c) => {
+  if (c.env.WRITEBACK_ENABLED !== 'true') return c.json({ error: 'writeback_disabled' }, 403);
+  const realms = await listActiveRealms(c.env);
+  const realm = resolveRealm(c, realms);
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const result = await seedDemoData(c.env, realm);
   return c.json({ ok: true, ...result });
 });
 

@@ -5,6 +5,8 @@ import { ReconcileScreen } from './screens/ReconcileScreen'
 import { ReportsScreen } from './screens/ReportsScreen'
 import { CaptureScreen } from './screens/CaptureScreen'
 import { ToastRegion, useToasts } from './components/Toast'
+import { api } from './api'
+import type { Company } from './types'
 
 type Screen = 'home' | 'review' | 'capture' | 'reconcile' | 'reports'
 
@@ -24,6 +26,33 @@ const NAV: NavItem[] = [
 export default function App() {
   const [screen, setScreen] = React.useState<Screen>('home')
   const { toasts, push, dismiss } = useToasts()
+  const [companies, setCompanies] = React.useState<Company[]>([])
+  const [company, setCompanyState] = React.useState<string | null>(() => {
+    const saved = localStorage.getItem('company')
+    if (saved) api.setCompany(saved)
+    return saved
+  })
+
+  // Load the connected companies for the switcher; keep the saved one if still valid.
+  React.useEffect(() => {
+    api
+      .companies()
+      .then((r) => {
+        setCompanies(r.companies)
+        setCompanyState((prev) => {
+          const valid = prev && r.companies.some((co) => co.realmId === prev) ? prev : r.companies[0]?.realmId ?? null
+          api.setCompany(valid)
+          return valid
+        })
+      })
+      .catch(() => {})
+  }, [])
+
+  const switchCompany = (realmId: string) => {
+    api.setCompany(realmId)
+    localStorage.setItem('company', realmId)
+    setCompanyState(realmId)
+  }
 
   // Surface the OAuth round-trip result (the Worker redirects back here with
   // ?connected=1 or ?error=…), then clean the query string from the URL.
@@ -84,6 +113,23 @@ export default function App() {
               </button>
             ))}
           </nav>
+
+          {companies.length > 0 && (
+            <label className="ml-auto flex items-center gap-2 text-sm">
+              <span className="sr-only">Active company</span>
+              <select
+                value={company ?? ''}
+                onChange={(e) => switchCompany(e.target.value)}
+                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 max-w-[12rem] truncate"
+              >
+                {companies.map((co) => (
+                  <option key={co.realmId} value={co.realmId}>
+                    {co.companyName ?? co.realmId}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </header>
 
@@ -91,21 +137,22 @@ export default function App() {
       <main className="flex-1" id="main-content">
         {screen === 'home' && (
           <HomeScreen
+            key={company ?? 'none'}
             onNavigate={s => setScreen(s)}
             pushToast={push}
           />
         )}
         {screen === 'review' && (
-          <ReviewScreen pushToast={push} />
+          <ReviewScreen key={company ?? 'none'} pushToast={push} />
         )}
         {screen === 'capture' && (
-          <CaptureScreen pushToast={push} />
+          <CaptureScreen key={company ?? 'none'} pushToast={push} />
         )}
         {screen === 'reconcile' && (
-          <ReconcileScreen pushToast={push} />
+          <ReconcileScreen key={company ?? 'none'} pushToast={push} />
         )}
         {screen === 'reports' && (
-          <ReportsScreen pushToast={push} />
+          <ReportsScreen key={company ?? 'none'} pushToast={push} />
         )}
       </main>
 

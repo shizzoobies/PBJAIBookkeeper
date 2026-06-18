@@ -197,3 +197,23 @@ export interface CapturePostResult {
   vendor: string
   attached: boolean
 }
+
+// ── Companies (multi-company switcher) ────────────────────────────────────────
+
+export interface Company {
+  realmId: string
+  companyName: string | null
+  status: string
+}
+
+export interface CompaniesResponse {
+  companies: Company[]
+}
+
+export interface SeedResponse {
+  ok: true
+  created: number
+  duplicates: number
+  bankCsv: string
+  period: { from: string; to: string }
+}

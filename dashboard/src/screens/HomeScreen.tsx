@@ -16,6 +16,7 @@ export function HomeScreen({ onNavigate, pushToast }: Props) {
   const [loadingStatus, setLoadingStatus] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [categorizing, setCategorizing] = useState(false)
+  const [seeding, setSeeding] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoadingStatus(true)
@@ -69,6 +70,30 @@ export function HomeScreen({ onNavigate, pushToast }: Props) {
       pushToast('error', e instanceof Error ? e.message : 'Categorization failed.')
     } finally {
       setCategorizing(false)
+    }
+  }
+
+  const handleSeed = async () => {
+    setSeeding(true)
+    try {
+      const r = await api.seed()
+      // Download the matching bank statement for the reconciliation demo.
+      const blob = new Blob([r.bankCsv], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'demo-bank-statement.csv'
+      a.click()
+      URL.revokeObjectURL(url)
+      pushToast(
+        'success',
+        `Added ${r.created} demo transactions and saved demo-bank-statement.csv. Next: Sync, then Run categorization. Reconcile period ${r.period.from} → ${r.period.to}.`,
+      )
+      void loadData()
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Could not seed demo data.')
+    } finally {
+      setSeeding(false)
     }
   }
 
@@ -181,6 +206,21 @@ export function HomeScreen({ onNavigate, pushToast }: Props) {
           >
             {categorizing ? <Spinner size="sm" /> : null}
             {categorizing ? 'Running…' : 'Run categorization'}
+          </button>
+          <button
+            className="btn-secondary"
+            onClick={handleSeed}
+            disabled={seeding}
+            aria-busy={seeding}
+          >
+            {seeding ? <Spinner size="sm" /> : null}
+            {seeding ? 'Seeding…' : 'Seed demo data'}
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={() => { window.location.href = `${API_BASE}/oauth/connect` }}
+          >
+            + Connect another company
           </button>
           <button
             className="btn-ghost"

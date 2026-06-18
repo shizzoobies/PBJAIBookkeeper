@@ -6,12 +6,15 @@ const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
 
 export { API_BASE }
 
+// The company switcher sets this; every request carries it as X-Company-Id so the
+// Worker targets the right connected company.
+let currentCompany: string | null = null
+
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const url = `${API_BASE}${path}`
-  const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
-  })
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (currentCompany) headers['X-Company-Id'] = currentCompany
+  const res = await fetch(url, { ...options, headers })
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`
     try {
@@ -28,7 +31,9 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
 // Multipart upload (file + optional JSON payload). Must NOT set Content-Type —
 // the browser sets multipart/form-data with the boundary.
 async function apiUpload<T>(path: string, form: FormData): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', body: form })
+  const headers: Record<string, string> = {}
+  if (currentCompany) headers['X-Company-Id'] = currentCompany
+  const res = await fetch(`${API_BASE}${path}`, { method: 'POST', body: form, headers })
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`
     try {
@@ -58,6 +63,8 @@ import type {
   CaptureExtractResponse,
   CapturePostPayload,
   CapturePostResult,
+  CompaniesResponse,
+  SeedResponse,
 } from './types'
 
 export const api = {
@@ -105,4 +112,11 @@ export const api = {
     if (file) form.append('file', file)
     return apiUpload<CapturePostResult>('/api/capture/post', form)
   },
+
+  setCompany: (realmId: string | null) => {
+    currentCompany = realmId
+  },
+  getCompany: () => currentCompany,
+  companies: () => apiFetch<CompaniesResponse>('/api/companies'),
+  seed: () => apiFetch<SeedResponse>('/api/dev/seed', { method: 'POST' }),
 }
