@@ -122,7 +122,15 @@ app.post('/api/sync', async (c) => {
   const realm = resolveRealm(c, realms);
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const result = await runSync(c.env, realm);
-  return c.json({ ok: true, ...result });
+  // Pull-and-categorize in one step (then autopilot, if enabled) so the review
+  // queue is ready without a separate click.
+  let categorized = 0;
+  let autoApproved = 0;
+  if (c.env.ANTHROPIC_API_KEY) {
+    categorized = (await categorizePending(c.env, realm)).total;
+    autoApproved = (await runAutoApprove(c.env, realm)).approved;
+  }
+  return c.json({ ok: true, ...result, categorized, autoApproved });
 });
 
 // Review-queue data: synced transactions (optionally filtered by review_status).

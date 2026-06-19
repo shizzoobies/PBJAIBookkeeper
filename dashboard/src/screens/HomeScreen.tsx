@@ -48,7 +48,11 @@ export function HomeScreen({ onNavigate, pushToast }: Props) {
     setSyncing(true)
     try {
       const r: SyncResponse = await api.sync()
-      pushToast('success', `Synced ${r.accounts} accounts and ${r.transactions} transactions.`)
+      pushToast(
+        'success',
+        `Synced ${r.transactions} transactions and categorized ${r.categorized ?? 0}.` +
+          (r.autoApproved ? ` Autopilot approved ${r.autoApproved}.` : ''),
+      )
       void loadData()
     } catch (e) {
       pushToast('error', e instanceof Error ? e.message : 'Sync failed.')
@@ -86,9 +90,12 @@ export function HomeScreen({ onNavigate, pushToast }: Props) {
       a.download = 'demo-bank-statement.csv'
       a.click()
       URL.revokeObjectURL(url)
+      // Pull the new transactions in and categorize them, so the demo is ready.
+      const s = await api.sync()
       pushToast(
         'success',
-        `Added ${r.created} demo transactions and saved demo-bank-statement.csv. Next: Sync, then Run categorization. Reconcile period ${r.period.from} → ${r.period.to}.`,
+        `Added ${r.created} demo transactions, synced and categorized ${s.categorized ?? 0}. ` +
+          `Saved demo-bank-statement.csv (reconcile ${r.period.from} → ${r.period.to}).`,
       )
       void loadData()
     } catch (e) {

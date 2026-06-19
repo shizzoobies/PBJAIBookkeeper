@@ -32,6 +32,8 @@ export interface SyncResponse {
   ok: true
   accounts: number
   transactions: number
+  categorized?: number
+  autoApproved?: number
 }
 
 export interface CategorizeResponse {
