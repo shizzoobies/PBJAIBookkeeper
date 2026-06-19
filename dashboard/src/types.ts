@@ -237,3 +237,22 @@ export interface AutoApproveResult {
   skipped: number
   reasons: Record<string, number>
 }
+
+// ── Teach (categorization guidance) ───────────────────────────────────────────
+
+export interface Guidance {
+  id: number
+  vendor: string | null
+  account_qbo_id: string | null
+  note: string
+}
+
+export interface GuidanceResponse {
+  guidance: Guidance[]
+}
+
+export interface GuidanceInput {
+  vendor?: string
+  accountQboId?: string
+  note: string
+}

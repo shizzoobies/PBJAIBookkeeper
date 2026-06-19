@@ -67,6 +67,8 @@ import type {
   SeedResponse,
   AutonomyConfig,
   AutoApproveResult,
+  GuidanceResponse,
+  GuidanceInput,
 } from './types'
 
 export const api = {
@@ -128,4 +130,9 @@ export const api = {
   autoApprove: () => apiFetch<AutoApproveResult>('/api/auto-approve', { method: 'POST' }),
   autoApproved: () => apiFetch<TransactionsResponse>('/api/auto-approved'),
   reopen: (id: number) => apiFetch<{ ok: true }>(`/api/transactions/${id}/reopen`, { method: 'POST' }),
+
+  guidance: () => apiFetch<GuidanceResponse>('/api/guidance'),
+  addGuidance: (g: GuidanceInput) =>
+    apiFetch<{ ok: true }>('/api/guidance', { method: 'POST', body: JSON.stringify(g) }),
+  deleteGuidance: (id: number) => apiFetch<{ ok: true }>(`/api/guidance/${id}`, { method: 'DELETE' }),
 }

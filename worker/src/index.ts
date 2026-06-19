@@ -23,6 +23,9 @@ import {
   audit,
   listAutoApproved,
   reopenTransaction,
+  listGuidance,
+  insertGuidance,
+  deleteGuidance,
 } from './db';
 import { runTokenRefreshSweep } from './cron';
 
@@ -270,6 +273,51 @@ app.post('/api/transactions/:id/reopen', async (c) => {
     action: 'transaction_reopened',
     detail_json: JSON.stringify({ id }),
   });
+  return c.json({ ok: true });
+});
+
+// ── Teach (categorization guidance) ───────────────────────────────────────────
+app.get('/api/guidance', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = resolveRealm(c, realms);
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  return c.json({ guidance: await listGuidance(c.env, realm.realm_id) });
+});
+
+app.post('/api/guidance', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = resolveRealm(c, realms);
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const parsed = z
+    .object({
+      vendor: z.string().trim().min(1).optional(),
+      accountQboId: z.string().trim().min(1).optional(),
+      note: z.string().trim().min(1).max(500),
+    })
+    .safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'note_required' }, 400);
+  await insertGuidance(c.env, {
+    realmId: realm.realm_id,
+    vendor: parsed.data.vendor ?? null,
+    accountQboId: parsed.data.accountQboId ?? null,
+    note: parsed.data.note,
+  });
+  await audit(c.env, {
+    realm_id: realm.realm_id,
+    actor: 'user',
+    action: 'guidance_added',
+    detail_json: JSON.stringify(parsed.data),
+  });
+  return c.json({ ok: true });
+});
+
+app.delete('/api/guidance/:id', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = resolveRealm(c, realms);
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid_id' }, 400);
+  await deleteGuidance(c.env, id, realm.realm_id);
   return c.json({ ok: true });
 });
 

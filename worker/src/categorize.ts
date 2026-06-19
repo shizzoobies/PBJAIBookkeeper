@@ -6,6 +6,8 @@ import {
   listTransactionsNeedingCategorization,
   setSuggestion,
   audit,
+  listGuidance,
+  type GuidanceRow,
 } from './db';
 import { ANTHROPIC_API_URL, ANTHROPIC_VERSION, CLASSIFIER_MODEL, CLASSIFY_BATCH_SIZE } from './constants';
 
@@ -57,12 +59,30 @@ async function classifyWithClaude(
   env: Env,
   txns: TransactionRow[],
   coa: CoaEntry[],
+  guidance: GuidanceRow[],
 ): Promise<Map<string, { account: string; confidence: number }>> {
   const out = new Map<string, { account: string; confidence: number }>();
   if (txns.length === 0 || coa.length === 0) return out;
   if (!env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY not configured');
 
   const accountList = coa.map((a) => `${a.id}: ${a.name}${a.type ? ` (${a.type})` : ''}`).join('\n');
+
+  // Plain-language "Teach" guidance from the firm, injected so the AI follows intent.
+  const acctNameById = new Map(coa.map((a) => [a.id, a.name]));
+  const guidanceBlock =
+    guidance.length > 0
+      ? 'Firm guidance — follow these when categorizing:\n' +
+        guidance
+          .map((g) => {
+            const who = g.vendor ? `For "${g.vendor}": ` : '';
+            const acct = g.account_qbo_id
+              ? ` Prefer account ${g.account_qbo_id} (${acctNameById.get(g.account_qbo_id) ?? '?'}).`
+              : '';
+            return `- ${who}${g.note}.${acct}`;
+          })
+          .join('\n') +
+        '\n\n'
+      : '';
 
   const system =
     'You categorize business expense transactions into a QuickBooks chart of accounts. ' +
@@ -76,7 +96,7 @@ async function classifyWithClaude(
     const lines = batch
       .map((t) => `- id=${t.qbo_id} | payee=${t.payee ?? ''} | desc=${t.description ?? ''} | amount=${t.amount} | date=${t.txn_date}`)
       .join('\n');
-    const userPrompt = `Accounts:\n${accountList}\n\nTransactions:\n${lines}\n\nReturn the JSON array now.`;
+    const userPrompt = `${guidanceBlock}Accounts:\n${accountList}\n\nTransactions:\n${lines}\n\nReturn the JSON array now.`;
 
     const res = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
@@ -146,7 +166,8 @@ export async function categorizePending(
 
   let aiCount = 0;
   if (needAi.length > 0) {
-    const suggestions = await classifyWithClaude(env, needAi, coa);
+    const guidance = await listGuidance(env, realm.realm_id);
+    const suggestions = await classifyWithClaude(env, needAi, coa, guidance);
     for (const txn of needAi) {
       const s = suggestions.get(txn.qbo_id);
       if (s) {

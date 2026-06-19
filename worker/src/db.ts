@@ -175,6 +175,42 @@ export async function insertRule(env: Env, r: InsertRuleParams): Promise<void> {
     .run();
 }
 
+// ── "Teach" guidance — plain-language notes fed into the AI categorizer ──────────
+export interface GuidanceRow {
+  id: number;
+  realm_id: string;
+  vendor: string | null;
+  account_qbo_id: string | null;
+  note: string;
+  created_at: number;
+}
+
+export async function listGuidance(env: Env, realmId: string): Promise<GuidanceRow[]> {
+  const { results } = await env.DB.prepare('SELECT * FROM guidance WHERE realm_id = ? ORDER BY id DESC')
+    .bind(realmId)
+    .all<GuidanceRow>();
+  return results ?? [];
+}
+
+export interface InsertGuidanceParams {
+  realmId: string;
+  vendor: string | null;
+  accountQboId: string | null;
+  note: string;
+}
+
+export async function insertGuidance(env: Env, g: InsertGuidanceParams): Promise<void> {
+  await env.DB.prepare(
+    'INSERT INTO guidance (realm_id, vendor, account_qbo_id, note, created_at) VALUES (?, ?, ?, ?, ?)',
+  )
+    .bind(g.realmId, g.vendor, g.accountQboId, g.note, nowSeconds())
+    .run();
+}
+
+export async function deleteGuidance(env: Env, id: number, realmId: string): Promise<void> {
+  await env.DB.prepare('DELETE FROM guidance WHERE id = ? AND realm_id = ?').bind(id, realmId).run();
+}
+
 // Pending transactions that have no suggestion yet.
 export async function listTransactionsNeedingCategorization(env: Env, realmId: string): Promise<TransactionRow[]> {
   const { results } = await env.DB.prepare(
