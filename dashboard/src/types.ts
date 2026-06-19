@@ -39,6 +39,7 @@ export interface CategorizeResponse {
   rules: number
   ai: number
   total: number
+  autoApproved?: number
 }
 
 export type ReviewStatus = 'pending' | 'approved' | 'adjusted'
@@ -55,6 +56,7 @@ export interface Transaction {
   suggested_account: string | null
   confidence: number | null
   review_status: ReviewStatus
+  auto_approved?: number
 }
 
 export interface TransactionsResponse {
@@ -216,4 +218,20 @@ export interface SeedResponse {
   duplicates: number
   bankCsv: string
   period: { from: string; to: string }
+}
+
+// ── Autopilot ─────────────────────────────────────────────────────────────────
+
+export interface AutonomyConfig {
+  enabled: boolean
+  minConfidence: number
+  maxAmount: number
+  requireKnownVendor: boolean
+}
+
+export interface AutoApproveResult {
+  ok?: true
+  approved: number
+  skipped: number
+  reasons: Record<string, number>
 }

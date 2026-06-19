@@ -12,6 +12,7 @@ import { reconcile, parseStatementCsv } from './reconcile';
 import { extractDocument } from './extract';
 import { postCapture } from './writeback';
 import { seedDemoData } from './seed';
+import { getAutonomy, setAutonomy, runAutoApprove } from './autonomy';
 import {
   listActiveRealms,
   listTransactions,
@@ -20,6 +21,8 @@ import {
   adjustTransaction,
   insertRule,
   audit,
+  listAutoApproved,
+  reopenTransaction,
 } from './db';
 import { runTokenRefreshSweep } from './cron';
 
@@ -139,7 +142,9 @@ app.post('/api/categorize', async (c) => {
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: 'anthropic_key_not_configured' }, 503);
   const result = await categorizePending(c.env, realm);
-  return c.json({ ok: true, ...result });
+  // If autopilot is on, clear the safe ones from the review queue right away.
+  const auto = await runAutoApprove(c.env, realm);
+  return c.json({ ok: true, ...result, autoApproved: auto.approved });
 });
 
 // Approve a transaction's current/suggested category.
@@ -190,6 +195,74 @@ app.post('/api/transactions/:id/adjust', async (c) => {
     detail_json: JSON.stringify({ id, account: parsed.data.account_qbo_id, ruleWritten: !!txn.payee }),
   });
   return c.json({ ok: true, ruleWritten: !!txn.payee });
+});
+
+// ── Autopilot (autonomy) ──────────────────────────────────────────────────────
+app.get('/api/autonomy', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = resolveRealm(c, realms);
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  return c.json(await getAutonomy(c.env, realm));
+});
+
+app.put('/api/autonomy', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = resolveRealm(c, realms);
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const parsed = z
+    .object({
+      enabled: z.boolean(),
+      minConfidence: z.number().min(0).max(1),
+      maxAmount: z.number().positive(),
+      requireKnownVendor: z.boolean(),
+    })
+    .safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'invalid_request' }, 400);
+  await setAutonomy(c.env, realm, parsed.data);
+  await audit(c.env, {
+    realm_id: realm.realm_id,
+    actor: 'user',
+    action: 'autopilot_settings_saved',
+    detail_json: JSON.stringify(parsed.data),
+  });
+  return c.json({ ok: true, ...parsed.data });
+});
+
+// Run autopilot on demand over the current review queue.
+app.post('/api/auto-approve', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = resolveRealm(c, realms);
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const result = await runAutoApprove(c.env, realm);
+  return c.json({ ok: true, ...result });
+});
+
+// What autopilot has approved (so the human can see and undo it).
+app.get('/api/auto-approved', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = resolveRealm(c, realms);
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const transactions = await listAutoApproved(c.env, realm.realm_id);
+  return c.json({ transactions });
+});
+
+// Send an auto-approved transaction back to the review queue.
+app.post('/api/transactions/:id/reopen', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = resolveRealm(c, realms);
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  const id = Number(c.req.param('id'));
+  if (!Number.isInteger(id)) return c.json({ error: 'invalid_id' }, 400);
+  const txn = await getTransaction(c.env, id, realm.realm_id);
+  if (!txn) return c.json({ error: 'not_found' }, 404);
+  await reopenTransaction(c.env, id);
+  await audit(c.env, {
+    realm_id: realm.realm_id,
+    actor: 'user',
+    action: 'transaction_reopened',
+    detail_json: JSON.stringify({ id }),
+  });
+  return c.json({ ok: true });
 });
 
 // Reconciliation prep: match posted transactions in [from,to] against an uploaded

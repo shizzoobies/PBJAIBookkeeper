@@ -65,6 +65,8 @@ import type {
   CapturePostResult,
   CompaniesResponse,
   SeedResponse,
+  AutonomyConfig,
+  AutoApproveResult,
 } from './types'
 
 export const api = {
@@ -119,4 +121,11 @@ export const api = {
   getCompany: () => currentCompany,
   companies: () => apiFetch<CompaniesResponse>('/api/companies'),
   seed: () => apiFetch<SeedResponse>('/api/dev/seed', { method: 'POST' }),
+
+  autonomy: () => apiFetch<AutonomyConfig>('/api/autonomy'),
+  saveAutonomy: (cfg: AutonomyConfig) =>
+    apiFetch<AutonomyConfig>('/api/autonomy', { method: 'PUT', body: JSON.stringify(cfg) }),
+  autoApprove: () => apiFetch<AutoApproveResult>('/api/auto-approve', { method: 'POST' }),
+  autoApproved: () => apiFetch<TransactionsResponse>('/api/auto-approved'),
+  reopen: (id: number) => apiFetch<{ ok: true }>(`/api/transactions/${id}/reopen`, { method: 'POST' }),
 }

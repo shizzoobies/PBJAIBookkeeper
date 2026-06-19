@@ -91,6 +91,7 @@ export interface TransactionRow {
   suggested_account: string | null;
   confidence: number | null;
   review_status: string;
+  auto_approved: number;
   raw_json: string | null;
   updated_at: number;
 }
@@ -198,6 +199,39 @@ export async function approveTransaction(env: Env, id: number): Promise<void> {
   await env.DB.prepare("UPDATE transactions SET review_status = 'approved', updated_at = ? WHERE id = ?")
     .bind(nowSeconds(), id)
     .run();
+}
+
+// Autopilot approval — marks auto_approved so the human can see and undo it.
+export async function approveTransactionAuto(env: Env, id: number): Promise<void> {
+  await env.DB.prepare("UPDATE transactions SET review_status = 'approved', auto_approved = 1, updated_at = ? WHERE id = ?")
+    .bind(nowSeconds(), id)
+    .run();
+}
+
+// Send an auto-approved transaction back to the review queue.
+export async function reopenTransaction(env: Env, id: number): Promise<void> {
+  await env.DB.prepare("UPDATE transactions SET review_status = 'pending', auto_approved = 0, updated_at = ? WHERE id = ?")
+    .bind(nowSeconds(), id)
+    .run();
+}
+
+export async function listAutoApproved(env: Env, realmId: string): Promise<TransactionRow[]> {
+  const { results } = await env.DB.prepare(
+    'SELECT * FROM transactions WHERE realm_id = ? AND auto_approved = 1 ORDER BY updated_at DESC, id DESC LIMIT 100',
+  )
+    .bind(realmId)
+    .all<TransactionRow>();
+  return results ?? [];
+}
+
+// Distinct payees we've reviewed before — used by the "known vendor" guardrail.
+export async function listApprovedPayees(env: Env, realmId: string): Promise<string[]> {
+  const { results } = await env.DB.prepare(
+    "SELECT DISTINCT payee FROM transactions WHERE realm_id = ? AND payee IS NOT NULL AND review_status IN ('approved', 'adjusted')",
+  )
+    .bind(realmId)
+    .all<{ payee: string }>();
+  return (results ?? []).map((r) => r.payee);
 }
 
 // Human-corrected category: store it, mark adjusted, and treat it as ground truth.

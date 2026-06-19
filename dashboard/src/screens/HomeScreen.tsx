@@ -63,7 +63,8 @@ export function HomeScreen({ onNavigate, pushToast }: Props) {
       const r: CategorizeResponse = await api.categorize()
       pushToast(
         'success',
-        `Categorized ${r.total} transactions — ${r.rules} by rule, ${r.ai} by AI.`,
+        `Categorized ${r.total} transactions — ${r.rules} by rule, ${r.ai} by AI.` +
+          (r.autoApproved ? ` Autopilot approved ${r.autoApproved}.` : ''),
       )
       void loadData()
     } catch (e) {
