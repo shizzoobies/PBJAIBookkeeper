@@ -69,6 +69,7 @@ import type {
   AutoApproveResult,
   GuidanceResponse,
   GuidanceInput,
+  ImportStatementResult,
 } from './types'
 
 export const api = {
@@ -135,4 +136,10 @@ export const api = {
   addGuidance: (g: GuidanceInput) =>
     apiFetch<{ ok: true }>('/api/guidance', { method: 'POST', body: JSON.stringify(g) }),
   deleteGuidance: (id: number) => apiFetch<{ ok: true }>(`/api/guidance/${id}`, { method: 'DELETE' }),
+
+  importStatement: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return apiUpload<ImportStatementResult>('/api/import-statement', form)
+  },
 }

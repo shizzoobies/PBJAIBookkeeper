@@ -9,13 +9,14 @@ import { query, report } from './qbo';
 import { runSync, type CoaEntry } from './sync';
 import { categorizePending } from './categorize';
 import { reconcile, parseStatementCsv } from './reconcile';
-import { extractDocument } from './extract';
+import { extractDocument, extractStatementLines } from './extract';
 import { postCapture } from './writeback';
 import { seedDemoData } from './seed';
 import { getAutonomy, setAutonomy, runAutoApprove } from './autonomy';
 import {
   listActiveRealms,
   listTransactions,
+  upsertTransaction,
   getTransaction,
   approveTransaction,
   adjustTransaction,
@@ -465,6 +466,52 @@ app.post('/api/dev/seed', async (c) => {
   if (!realm) return c.json({ error: 'no_connected_company' }, 404);
   const result = await seedDemoData(c.env, realm);
   return c.json({ ok: true, ...result });
+});
+
+// Import a bank/credit-card statement (PDF or image): extract every transaction,
+// stage it in the review queue, and categorize it (+ autopilot if on). For clients
+// whose bank won't link to QBO, so the statement is the transaction source. Local
+// review-state only — posting the approved ones into QBO is the write-back follow-on.
+app.post('/api/import-statement', async (c) => {
+  const realms = await listActiveRealms(c.env);
+  const realm = resolveRealm(c, realms);
+  if (!realm) return c.json({ error: 'no_connected_company' }, 404);
+  if (!c.env.ANTHROPIC_API_KEY) return c.json({ error: 'anthropic_key_not_configured' }, 503);
+
+  const form = await c.req.formData().catch(() => null);
+  const file = form?.get('file') as UploadedFile | string | null | undefined;
+  if (!file || typeof file === 'string') return c.json({ error: 'file_required' }, 400);
+  if (!CAPTURE_TYPES.has(file.type)) return c.json({ error: 'unsupported_file_type', detail: file.type }, 400);
+
+  const buf = await file.arrayBuffer();
+  const lines = await extractStatementLines(c.env, { mediaType: file.type, dataBase64: toBase64(buf) });
+
+  const stamp = Date.now();
+  let imported = 0;
+  for (const [i, l] of lines.entries()) {
+    await upsertTransaction(c.env, {
+      realmId: realm.realm_id,
+      qboId: `stmt:${stamp}:${i}`,
+      txnType: l.amount < 0 ? 'Expense' : 'Deposit',
+      txnDate: l.date,
+      description: l.description,
+      payee: null,
+      amount: l.amount,
+      accountQboId: null,
+      rawJson: JSON.stringify({ source: 'pdf-statement', ...l }),
+    });
+    imported++;
+  }
+
+  const categorized = (await categorizePending(c.env, realm)).total;
+  const autoApproved = (await runAutoApprove(c.env, realm)).approved;
+  await audit(c.env, {
+    realm_id: realm.realm_id,
+    actor: 'user',
+    action: 'statement_imported',
+    detail_json: JSON.stringify({ imported }),
+  });
+  return c.json({ ok: true, imported, categorized, autoApproved });
 });
 
 app.post('/webhook/qbo', handleWebhook);

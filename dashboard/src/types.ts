@@ -256,3 +256,10 @@ export interface GuidanceInput {
   accountQboId?: string
   note: string
 }
+
+export interface ImportStatementResult {
+  ok: true
+  imported: number
+  categorized: number
+  autoApproved: number
+}

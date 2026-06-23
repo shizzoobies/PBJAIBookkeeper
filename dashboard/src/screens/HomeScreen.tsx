@@ -17,6 +17,7 @@ export function HomeScreen({ onNavigate, pushToast }: Props) {
   const [syncing, setSyncing] = useState(false)
   const [categorizing, setCategorizing] = useState(false)
   const [seeding, setSeeding] = useState(false)
+  const [importing, setImporting] = useState(false)
 
   const loadData = useCallback(async () => {
     setLoadingStatus(true)
@@ -102,6 +103,24 @@ export function HomeScreen({ onNavigate, pushToast }: Props) {
       pushToast('error', e instanceof Error ? e.message : 'Could not seed demo data.')
     } finally {
       setSeeding(false)
+    }
+  }
+
+  const handleImportStatement = async (f: File) => {
+    setImporting(true)
+    try {
+      const r = await api.importStatement(f)
+      pushToast(
+        'success',
+        `Imported ${r.imported} transactions from the statement and categorized ${r.categorized}.` +
+          (r.autoApproved ? ` Autopilot approved ${r.autoApproved}.` : '') +
+          ' Check Review.',
+      )
+      void loadData()
+    } catch (e) {
+      pushToast('error', e instanceof Error ? e.message : 'Could not read that statement.')
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -215,6 +234,21 @@ export function HomeScreen({ onNavigate, pushToast }: Props) {
             {categorizing ? <Spinner size="sm" /> : null}
             {categorizing ? 'Running…' : 'Run categorization'}
           </button>
+          <label className="btn-secondary inline-flex cursor-pointer">
+            {importing ? <Spinner size="sm" /> : null}
+            {importing ? 'Reading…' : 'Import statement (PDF)'}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp,application/pdf"
+              className="sr-only"
+              disabled={importing}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) void handleImportStatement(f)
+                e.target.value = ''
+              }}
+            />
+          </label>
           <button
             className="btn-secondary"
             onClick={handleSeed}
